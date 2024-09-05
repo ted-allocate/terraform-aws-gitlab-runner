@@ -1,0 +1,4 @@
+  [runners.feature_flags]
+%{ for feature in features ~}
+    ${feature} = true
+%{ endfor ~}

@@ -62,6 +62,10 @@ locals {
     }
   )
 
+  runner_feature_flags_toml = templatefile("${path.module}/template/runner-feature-flags.tftpl", {
+    options = var.runner_feature_flags
+  })
+
   # Ensure max builds is optional
   runners_max_builds_string = var.runner_worker_docker_machine_instance.destroy_after_max_builds == 0 ? "" : format("MaxBuilds = %d", var.runner_worker_docker_machine_instance.destroy_after_max_builds)
 

@@ -386,6 +386,12 @@ variable "runner_terminate_ec2_timeout_duration" {
   default     = 90
 }
 
+variable "runner_feature_flags" {
+  description = "List of feature flags to enable in the deployed runners."
+  type = list(string)
+  default = []
+}
+
 /*
  * Runner Worker: The process created by the Runner on the host computing platform to run jobs.
  */

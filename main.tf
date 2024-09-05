@@ -166,6 +166,7 @@ locals {
       runners_services_volumes_tmpfs = join("\n", [for v in var.runner_worker_docker_services_volumes_tmpfs : format("\"%s\" = \"%s\"", v.volume, v.options)])
       runners_docker_services        = local.runners_docker_services
       runners_docker_options         = local.runners_docker_options_toml
+      runners_feature_flags          = length(var.runner_feature_flags) > 0 ? local.runner_feature_flags_toml : ""
       bucket_name                    = local.bucket_name
       shared_cache                   = var.runner_worker_cache.shared
       sentry_dsn                     = var.runner_manager.sentry_dsn
