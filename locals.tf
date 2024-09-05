@@ -63,7 +63,7 @@ locals {
   )
 
   runner_feature_flags_toml = templatefile("${path.module}/template/runner-feature-flags.tftpl", {
-    options = var.runner_feature_flags
+    features = var.runner_feature_flags
   })
 
   # Ensure max builds is optional
