@@ -59,6 +59,7 @@ module "runner" {
     collect_autoscaling_metrics = ["GroupDesiredCapacity", "GroupInServiceCapacity"]
     name                        = var.runner_name
     ssm_access                  = true
+    private_address_only        = false
   }
 
   runner_networking = {
@@ -72,8 +73,13 @@ module "runner" {
   }
 
   runner_worker = {
-    type     = "docker-autoscaler"
-    max_jobs = 10
+    type            = "docker-autoscaler"
+    max_jobs        = 10
+    use_private_key = true
+
+    environment_variables = [
+      "FF_USE_POWERSHELL_PATH_RESOLVER=1"
+    ]
   }
 
   runner_worker_gitlab_pipeline = {
@@ -88,23 +94,28 @@ module "runner" {
 
   runner_worker_docker_autoscaler = {
     fleeting_plugin_version = "1.0.0"
+    connector_config_user   = "Administrator"
   }
 
-  runner_worker_docker_autoscaler_ami_owners = ["591542846629"] # FIXME Change to your AWS account ID
-  runner_worker_docker_autoscaler_ami_filter = {
-    name = ["al2023-ami-ecs-hvm-2023.0.20240723-kernel-6.1-x86_64"] # FIXME Change to your AMI name
-  }
+  runner_worker_docker_autoscaler_ami_owners = ["self"] # FIXME Leave to self or change to your AWS account ID
+  runner_worker_docker_autoscaler_ami_id     = "<windows-ami-id>"
 
   runner_worker_docker_autoscaler_instance = {
-    monitoring = true
+    monitoring           = true
+    private_address_only = false
   }
 
   runner_worker_docker_autoscaler_asg = {
-    subnet_ids                               = module.vpc.private_subnets
-    types                                    = ["t3a.micro", "t3a.small", "t3.micro", "t3.small"]
-    enable_mixed_instances_policy            = true
-    on_demand_base_capacity                  = 1
+    subnet_ids                    = module.vpc.private_subnets
+    types                         = ["m6a.medium", "m6i.medium"] # FIXME change these to what best fits your needs, keeping in mind that Windows runners need bigger instances
+    enable_mixed_instances_policy = true
+
+    # FIXME These settings enable windows runners to scale down to zero if no jobs are running but you can change it to fit your needs
+    on_demand_base_capacity                  = 0
     on_demand_percentage_above_base_capacity = 0
+    max_growth_rate                          = 10
+    spot_allocation_strategy                 = "price-capacity-optimized"
+    spot_instance_pools                      = 0
   }
 
   runner_worker_docker_autoscaler_autoscaling_options = [
@@ -125,7 +136,8 @@ module "runner" {
   ]
 
   runner_worker_docker_options = {
-    volumes = ["/cache", "/var/run/docker.sock:/var/run/docker.sock"]
+    volumes    = ["C:/cache"]
+    privileged = false
   }
 
   tags = {

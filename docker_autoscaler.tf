@@ -3,57 +3,6 @@
 # outdated docker+machine driver. The docker+machine driver is a legacy driver that is no longer maintained by GitLab.
 #
 
-resource "aws_security_group" "docker_autoscaler" {
-  count = var.runner_worker.type == "docker-autoscaler" ? 1 : 0
-
-  description = "Docker autoscaler security group"
-  vpc_id      = var.vpc_id
-  name        = "${local.name_sg}-docker-autoscaler"
-
-  tags = merge(
-    local.tags,
-    {
-      "Name" = format("%s", local.name_sg)
-    },
-  )
-}
-
-resource "aws_security_group_rule" "autoscaler_egress" {
-  count = var.runner_worker.type == "docker-autoscaler" ? 1 : 0
-
-  description       = "All egress traffic docker autoscaler"
-  type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = join("", aws_security_group.docker_autoscaler[*].id)
-}
-
-resource "aws_security_group_rule" "autoscaler_ingress" {
-  count = var.runner_worker.type == "docker-autoscaler" ? 1 : 0
-
-  description              = "All ingress traffic from runner security group"
-  type                     = "ingress"
-  from_port                = 0
-  to_port                  = 0
-  protocol                 = "-1"
-  source_security_group_id = aws_security_group.runner.id
-  security_group_id        = join("", aws_security_group.docker_autoscaler[*].id)
-}
-
-resource "aws_security_group_rule" "extra_autoscaler_ingress" {
-  count = var.runner_worker.type == "docker-autoscaler" ? length(var.runner_worker_docker_autoscaler_asg.sg_ingresses) : 0
-
-  description       = var.runner_worker_docker_autoscaler_asg.sg_ingresses[count.index].description
-  type              = "ingress"
-  from_port         = var.runner_worker_docker_autoscaler_asg.sg_ingresses[count.index].from_port
-  to_port           = var.runner_worker_docker_autoscaler_asg.sg_ingresses[count.index].to_port
-  protocol          = var.runner_worker_docker_autoscaler_asg.sg_ingresses[count.index].protocol
-  cidr_blocks       = var.runner_worker_docker_autoscaler_asg.sg_ingresses[count.index].cidr_blocks
-  security_group_id = join("", aws_security_group.docker_autoscaler[*].id)
-}
-
 ####################################
 ###### Launch template Workers #####
 ####################################
@@ -62,8 +11,8 @@ resource "aws_launch_template" "this" {
 
   name          = "${local.name_runner_agent_instance}-worker-launch-template"
   user_data     = base64gzip(var.runner_worker_docker_autoscaler_instance.start_script)
-  image_id      = data.aws_ami.docker-autoscaler[0].id
-  instance_type = var.runner_worker_docker_autoscaler_asg.types[0]
+  image_id      = length(var.runner_worker_docker_autoscaler_ami_id) > 0 ? var.runner_worker_docker_autoscaler_ami_id : data.aws_ami.docker_autoscaler_by_filter[0].id
+  instance_type = length(var.runner_worker_docker_autoscaler_asg.types) > 0 ? var.runner_worker_docker_autoscaler_asg.types[0] : var.runner_worker_docker_autoscaler_asg.default_instance_type
   key_name      = aws_key_pair.autoscaler[0].key_name
   ebs_optimized = var.runner_worker_docker_autoscaler_instance.ebs_optimized
 
@@ -88,6 +37,8 @@ resource "aws_launch_template" "this" {
       volume_type = var.runner_worker_docker_autoscaler_instance.volume_type
       iops        = contains(["gp3", "io1", "io2"], var.runner_worker_docker_autoscaler_instance.volume_type) ? var.runner_worker_docker_autoscaler_instance.volume_iops : null
       throughput  = var.runner_worker_docker_autoscaler_instance.volume_type == "gp3" ? var.runner_worker_docker_autoscaler_instance.volume_throughput : null
+      encrypted   = true
+      kms_key_id  = local.kms_key_arn
     }
   }
 
@@ -95,9 +46,12 @@ resource "aws_launch_template" "this" {
     resource_type = "instance"
     tags          = local.tags
   }
-
   tag_specifications {
     resource_type = "volume"
+    tags          = local.tags
+  }
+  tag_specifications {
+    resource_type = "network-interface"
     tags          = local.tags
   }
 
@@ -125,6 +79,7 @@ resource "aws_autoscaling_group" "autoscaler" {
   name                  = "${local.name_runner_agent_instance}-asg"
   capacity_rebalance    = false
   protect_from_scale_in = true
+  suspended_processes   = ["AZRebalance"]
 
   dynamic "launch_template" {
     for_each = var.runner_worker_docker_autoscaler_asg.enable_mixed_instances_policy ? [] : [1]
@@ -149,10 +104,37 @@ resource "aws_autoscaling_group" "autoscaler" {
           launch_template_id = aws_launch_template.this[0].id
           version            = aws_launch_template.this[0].latest_version
         }
+
         dynamic "override" {
           for_each = var.runner_worker_docker_autoscaler_asg.types
           content {
             instance_type = override.value
+          }
+        }
+
+        dynamic "override" {
+          for_each = var.runner_worker_docker_autoscaler_asg.instance_requirements
+          content {
+            instance_requirements {
+              allowed_instance_types = override.value.allowed_instance_types
+              cpu_manufacturers      = override.value.cpu_manufacturers
+              instance_generations   = override.value.instance_generations
+              burstable_performance  = override.value.burstable_performance
+              dynamic "memory_mib" {
+                for_each = [override.value.memory_mib]
+                content {
+                  max = memory_mib.value.max
+                  min = memory_mib.value.min
+                }
+              }
+              dynamic "vcpu_count" {
+                for_each = [override.value.vcpu_count]
+                content {
+                  max = vcpu_count.value.max
+                  min = vcpu_count.value.min
+                }
+              }
+            }
           }
         }
       }
@@ -189,11 +171,32 @@ resource "aws_autoscaling_group" "autoscaler" {
   }
 
   lifecycle {
-    # do not change these values as we would immediately scale up/down, which is not wanted
+    # do not change desired_capacity as this is controlled at runtime by the runner autoscaler
     ignore_changes = [
-      desired_capacity,
-      min_size,
-      max_size
+      desired_capacity
     ]
   }
+}
+
+resource "aws_iam_instance_profile" "docker_autoscaler" {
+  count = var.runner_worker.type == "docker-autoscaler" ? 1 : 0
+  name  = "${local.name_iam_objects}-docker-autoscaler"
+  role  = aws_iam_role.docker_autoscaler[0].name
+  tags  = local.tags
+}
+
+resource "tls_private_key" "autoscaler" {
+  count = var.runner_worker.type == "docker-autoscaler" ? 1 : 0
+
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "autoscaler" {
+  count = var.runner_worker.type == "docker-autoscaler" ? 1 : 0
+
+  key_name   = "${var.environment}-${var.runner_worker_docker_autoscaler.key_pair_name}"
+  public_key = tls_private_key.autoscaler[0].public_key_openssh
+
+  tags = local.tags
 }

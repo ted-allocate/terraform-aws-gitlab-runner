@@ -1,22 +1,18 @@
-# Example - Spot Runner - Default
+# Example - AWS Fleeting Plugin with Windows runners
 
-In this scenario the runner agent is running on a single EC2 node and runners are created by [docker machine](https://docs.gitlab.com/runner/configuration/autoscale.html)
-using spot instances. Runners will scale automatically based on configuration. The module creates by default a S3 cache
-that is shared cross runners (spot instances).
+This example shows how to deploy a GitLab Runner using the [AWS Fleeting Plugin](https://docs.gitlab.com/runner/configuration/autoscale.html)
+with on Windows, allowing usage of Docker and spot instances.
 
 This examples shows:
 
-  - Usages of public / private VPC
-  - You can log into the instance via SSM (Session Manager).
-  - Registration via GitLab token.
-  - Auto scaling using `docker+machine` executor.
-  - Additional security groups that are allowed access to the runner agent
-  - Use of `runners.docker.services` to configure docker registry mirror (commented out - uncomment to apply)
+- You can log into the instance via SSM (Session Manager).
+- register the Runner manually in GitLab
+- Auto scaling Windows runners using AWS Fleeting Plugin.
 
 Multi region deployment is, of course, possible. Just instantiate the module multiple times with different AWS providers. In case
 you use the cache, make sure to have one cache per region.
 
-![runners-default](https://github.com/cattle-ops/terraform-aws-gitlab-runner/raw/main/assets/images/runner-default.png)
+Attention: You **must** to built your own AMI before. See the [README.md](../../packer_images/README.md#windows-server-2022-ami) for more information.
 
 ## Prerequisite
 
